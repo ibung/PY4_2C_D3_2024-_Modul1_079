@@ -1,5 +1,8 @@
+
+
 // =============================
 // counter_view.dart
+// =============================
 // =============================
 import 'package:flutter/material.dart';
 import 'counter_controller.dart';
@@ -13,7 +16,6 @@ class CounterView extends StatefulWidget {
 
 class _CounterViewState extends State<CounterView> {
   final CounterController _controller = CounterController();
-  double _currentStep = 1;
 
   @override
   Widget build(BuildContext context) {
@@ -54,11 +56,10 @@ class _CounterViewState extends State<CounterView> {
                   min: 1,
                   max: 20,
                   divisions: 19,
-                  value: _currentStep,
-                  label: _currentStep.round().toString(),
+                  value: _controller.step.toDouble(),
+                  label: _controller.step.toString(),
                   onChanged: (value) {
                     setState(() {
-                      _currentStep = value;
                       _controller.setStep(value.round());
                     });
                   },

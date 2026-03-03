@@ -37,9 +37,11 @@ class LogController {
       filteredLogs.value = logsNotifier.value;
     } else {
       filteredLogs.value = logsNotifier.value
-          .where((log) =>
-              log.title.toLowerCase().contains(query.toLowerCase()) ||
-              log.description.toLowerCase().contains(query.toLowerCase()))
+          .where(
+            (log) =>
+                log.title.toLowerCase().contains(query.toLowerCase()) ||
+                log.description.toLowerCase().contains(query.toLowerCase()),
+          )
           .toList();
     }
   }
@@ -73,7 +75,11 @@ class LogController {
 
   // ===== EDIT =====
   void updateLog(
-      int index, String title, String description, String category) async {
+    int index,
+    String title,
+    String description,
+    String category,
+  ) async {
     final old = logsNotifier.value[index];
 
     final updated = LogModel(
@@ -91,12 +97,14 @@ class LogController {
     // Jika log lama punya id cloud, update ke Atlas
     if (old.id != null) {
       try {
-        await _db.updateLog(Logbook(
-          id: ObjectId.fromHexString(old.id!),
-          title: title,
-          description: description,
-          date: DateTime.parse(updated.timestamp),
-        ));
+        await _db.updateLog(
+          Logbook(
+            id: ObjectId.fromHexString(old.id!),
+            title: title,
+            description: description,
+            date: DateTime.parse(updated.timestamp),
+          ),
+        );
       } catch (_) {}
     }
 
@@ -136,13 +144,15 @@ class LogController {
       final cloudData = await _db.getLogs();
 
       logsNotifier.value = cloudData
-          .map((lb) => LogModel(
-                id: lb.id?.toHexString(),
-                title: lb.title,
-                description: lb.description,
-                timestamp: lb.date.toIso8601String(),
-                category: 'Pribadi',
-              ))
+          .map(
+            (lb) => LogModel(
+              id: lb.id?.toHexString(),
+              title: lb.title,
+              description: lb.description,
+              timestamp: lb.date.toIso8601String(),
+              category: 'Pribadi',
+            ),
+          )
           .toList();
 
       // Simpan salinan lokal untuk mode offline

@@ -23,7 +23,7 @@ class _LogViewState extends State<LogView> {
     'Pekerjaan',
     'Pribadi',
     'Urgent',
-    'Lainnya'
+    'Lainnya',
   ];
   String _selectedCategory = 'Pribadi';
 
@@ -58,8 +58,10 @@ class _LogViewState extends State<LogView> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E3A5F),
         foregroundColor: Colors.white,
-        title: const Text("Daily Logger",
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Daily Logger",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -78,9 +80,10 @@ class _LogViewState extends State<LogView> {
             child: Text(
               "$_greeting, ${widget.username} 👋",
               style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600),
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
 
@@ -143,20 +146,25 @@ class _LogViewState extends State<LogView> {
                           direction: DismissDirection.endToStart,
                           background: Container(
                             margin: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 6),
+                              horizontal: 16,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.red,
                               borderRadius: BorderRadius.circular(14),
                             ),
                             alignment: Alignment.centerRight,
                             padding: const EdgeInsets.only(right: 20),
-                            child:
-                                const Icon(Icons.delete, color: Colors.white),
+                            child: const Icon(
+                              Icons.delete,
+                              color: Colors.white,
+                            ),
                           ),
                           onDismissed: (_) {
                             final realIndex = _controller.logsNotifier.value
                                 .indexWhere(
-                                    (l) => l.timestamp == log.timestamp);
+                                  (l) => l.timestamp == log.timestamp,
+                                );
                             if (realIndex != -1) {
                               _controller.removeLog(realIndex);
                             }
@@ -172,13 +180,15 @@ class _LogViewState extends State<LogView> {
                             onEdit: () {
                               final realIndex = _controller.logsNotifier.value
                                   .indexWhere(
-                                      (l) => l.timestamp == log.timestamp);
+                                    (l) => l.timestamp == log.timestamp,
+                                  );
                               _showEditDialog(realIndex, log);
                             },
                             onDelete: () {
                               final realIndex = _controller.logsNotifier.value
                                   .indexWhere(
-                                      (l) => l.timestamp == log.timestamp);
+                                    (l) => l.timestamp == log.timestamp,
+                                  );
                               if (realIndex != -1) {
                                 _controller.removeLog(realIndex);
                               }
@@ -219,9 +229,10 @@ class _LogViewState extends State<LogView> {
                 ? "Belum ada catatan"
                 : "Catatan tidak ditemukan",
             style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey.shade500),
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade500,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -302,7 +313,9 @@ class _LogViewState extends State<LogView> {
               TextField(
                 controller: _titleCtrl,
                 decoration: const InputDecoration(
-                    labelText: "Judul", border: OutlineInputBorder()),
+                  labelText: "Judul",
+                  border: OutlineInputBorder(),
+                ),
               ),
               const SizedBox(height: 12),
               // Input deskripsi
@@ -310,21 +323,24 @@ class _LogViewState extends State<LogView> {
                 controller: _descCtrl,
                 maxLines: 3,
                 decoration: const InputDecoration(
-                    labelText: "Deskripsi", border: OutlineInputBorder()),
+                  labelText: "Deskripsi",
+                  border: OutlineInputBorder(),
+                ),
               ),
               const SizedBox(height: 12),
               // Dropdown kategori
-              const Text("Kategori:",
-                  style:
-                      TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const Text(
+                "Kategori:",
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 6),
               DropdownButtonFormField<String>(
                 value: _selectedCategory,
-                decoration:
-                    const InputDecoration(border: OutlineInputBorder()),
+                decoration: const InputDecoration(border: OutlineInputBorder()),
                 items: _categories
-                    .map((cat) =>
-                        DropdownMenuItem(value: cat, child: Text(cat)))
+                    .map(
+                      (cat) => DropdownMenuItem(value: cat, child: Text(cat)),
+                    )
                     .toList(),
                 onChanged: (val) {
                   if (val != null) {
@@ -337,13 +353,15 @@ class _LogViewState extends State<LogView> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Batal")),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Batal"),
+          ),
           ElevatedButton(
             onPressed: onSave,
             style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E3A5F),
-                foregroundColor: Colors.white),
+              backgroundColor: const Color(0xFF1E3A5F),
+              foregroundColor: Colors.white,
+            ),
             child: Text(saveLabel),
           ),
         ],
@@ -361,8 +379,9 @@ class _LogViewState extends State<LogView> {
         content: const Text("Apakah Anda yakin ingin keluar?"),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Batal")),
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Batal"),
+          ),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
@@ -371,8 +390,10 @@ class _LogViewState extends State<LogView> {
                 MaterialPageRoute(builder: (_) => const LoginView()),
               );
             },
-            child:
-                const Text("Ya, Keluar", style: TextStyle(color: Colors.red)),
+            child: const Text(
+              "Ya, Keluar",
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),

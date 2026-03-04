@@ -2,29 +2,24 @@ import 'dart:developer' as dev;
 import 'dart:io';
 import 'package:intl/intl.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:path_provider/path_provider.dart';
 
-/// Task 4: Professional Audit Logging
-///
-/// Fitur:
-/// - Verbosity Control via LOG_LEVEL di .env (1=ERROR, 2=INFO, 3=VERBOSE)
-/// - Source Filtering via LOG_MUTE di .env (comma-separated)
-/// - File log per tanggal: /logs/dd-mm-yyyy.log
 class LogHelper {
   static Future<void> writeLog(
     String message, {
     String source = "Unknown",
     int level = 2,
   }) async {
-    // Baca konfigurasi dari .env
     final int configLevel = int.tryParse(dotenv.env['LOG_LEVEL'] ?? '2') ?? 2;
     final String muteList = dotenv.env['LOG_MUTE'] ?? '';
 
-    // Filter berdasarkan level (hanya tampilkan jika level <= configLevel)
     if (level > configLevel) return;
 
-    // Filter berdasarkan source (matikan log dari file tertentu)
-    final List<String> mutedSources =
-        muteList.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    final List<String> mutedSources = muteList
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
     if (mutedSources.contains(source)) return;
 
     try {
@@ -37,18 +32,17 @@ class LogHelper {
       dev.log(message, name: source, time: now, level: level * 100);
 
       // Output berwarna ke terminal
-      // Catatan: LOG_LEVEL=3 menampilkan semua detail log (VERBOSE)
       print('$color[$timestamp][$label][$source] -> $message\x1B[0m');
 
-      // Task 4: Tulis ke file log per tanggal di folder /logs/
+      // Task 4: Tulis ke file log per tanggal
       await _writeToFile(now, label, source, message);
     } catch (e) {
       dev.log("Logging failed: $e", name: "SYSTEM", level: 1000);
     }
   }
 
-  /// Menulis log ke file /logs/dd-mm-yyyy.log
-  /// File terbentuk otomatis per tanggal
+  /// Menulis log ke file logs/dd-MM-yyyy.log
+  /// Menggunakan path_provider agar path valid di semua platform.
   static Future<void> _writeToFile(
     DateTime now,
     String label,
@@ -56,49 +50,49 @@ class LogHelper {
     String message,
   ) async {
     try {
-      final String dateStr = DateFormat('dd-MM-yyyy').format(now);
-      final String timeStr = DateFormat('HH:mm:ss').format(now);
-      final Directory logsDir = Directory('logs');
+      // getApplicationDocumentsDirectory() → path yang bisa ditulis di semua platform
+      final Directory appDir = await getApplicationDocumentsDirectory();
+      final Directory logsDir = Directory('${appDir.path}/logs');
 
-      // Buat folder /logs jika belum ada
+      // Buat folder logs/ jika belum ada
       if (!await logsDir.exists()) {
         await logsDir.create(recursive: true);
       }
 
-      final File logFile = File('logs/$dateStr.log');
+      final String dateStr = DateFormat('dd-MM-yyyy').format(now);
+      final String timeStr = DateFormat('HH:mm:ss').format(now);
+      final File logFile = File('${logsDir.path}/$dateStr.log');
       final String logLine = '[$timeStr][$label][$source] -> $message\n';
 
-      // Append ke file (tidak menimpa log sebelumnya)
+      // Append ke file — log lama tidak tertimpa
       await logFile.writeAsString(logLine, mode: FileMode.append);
+
+      // Cetak path saat pertama kali file dibuat (berguna untuk debugging)
+      dev.log(
+        "Log ditulis ke: ${logFile.path}",
+        name: "LogHelper",
+        level: 100,
+      );
     } catch (e) {
-      // Gagal tulis file tidak boleh crash aplikasi
       dev.log("File logging failed: $e", name: "LogHelper", level: 1000);
     }
   }
 
   static String _getLabel(int level) {
     switch (level) {
-      case 1:
-        return "ERROR";
-      case 2:
-        return "INFO";
-      case 3:
-        return "VERBOSE";
-      default:
-        return "LOG";
+      case 1: return "ERROR";
+      case 2: return "INFO";
+      case 3: return "VERBOSE";
+      default: return "LOG";
     }
   }
 
   static String _getColor(int level) {
     switch (level) {
-      case 1:
-        return '\x1B[31m'; // Merah untuk ERROR
-      case 2:
-        return '\x1B[32m'; // Hijau untuk INFO
-      case 3:
-        return '\x1B[34m'; // Biru untuk VERBOSE
-      default:
-        return '\x1B[0m';
+      case 1: return '\x1B[31m'; // Merah
+      case 2: return '\x1B[32m'; // Hijau
+      case 3: return '\x1B[34m'; // Biru
+      default: return '\x1B[0m';
     }
   }
 }

@@ -93,8 +93,8 @@ class _OnboardingViewState extends State<OnboardingView> {
 
               // ── KONTEN TENGAH ─────────────────────────
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [

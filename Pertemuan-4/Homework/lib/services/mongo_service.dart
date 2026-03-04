@@ -3,11 +3,6 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:logbook_app_079/models/logbook_model.dart';
 import 'package:logbook_app_079/helpers/log_helper.dart';
 
-/// Task 2: Service Singleton
-/// MongoService menggunakan pola Singleton agar hanya ada SATU instance
-/// koneksi ke MongoDB Atlas di seluruh siklus hidup aplikasi.
-///
-/// Task 4: Smart Logger diterapkan di setiap fungsi CRUD.
 class MongoService {
   // --- SINGLETON PATTERN ---
   static final MongoService _instance = MongoService._internal();

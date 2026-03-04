@@ -1,11 +1,5 @@
 import 'package:mongo_dart/mongo_dart.dart';
 
-/// Model data untuk entri logbook.
-///
-/// Task 2: Mendukung tipe data ObjectId dari mongo_dart
-/// untuk mapping _id MongoDB secara benar.
-///
-/// Update: Tambah field [category] untuk mendukung dropdown kategori di UI.
 class Logbook {
   final ObjectId? id;       // ID unik dari MongoDB (ObjectId)
   final String title;

@@ -187,7 +187,7 @@ class _LogViewState extends State<LogView> {
             color: const Color(0xFF1E3A5F),
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: Text(
-              "$_greeting, ${widget.username} 👋",
+              "$_greeting, ${widget.username}",
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 16,
@@ -298,7 +298,7 @@ class _LogViewState extends State<LogView> {
                           const SizedBox(height: 20),
                           Text(
                             _isOffline
-                                ? "Kamu Sedang Offline 📡"
+                                ? "Kamu Sedang Offline"
                                 : "Gagal Terhubung ke Server",
                             style: const TextStyle(
                               fontSize: 18,
@@ -448,7 +448,7 @@ class _LogViewState extends State<LogView> {
           const SizedBox(height: 8),
           Text(
             _searchCtrl.text.isEmpty
-                ? "Tap tombol + untuk mulai mencatat 🚀"
+                ? "Tap tombol + untuk mulai mencatat "
                 : "Coba kata kunci lain",
             style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
           ),

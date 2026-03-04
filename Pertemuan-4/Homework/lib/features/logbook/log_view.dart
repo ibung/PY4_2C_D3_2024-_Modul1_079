@@ -1,11 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../auth/login_view.dart';
 import 'package:logbook_app_079/models/logbook_model.dart';
 import 'package:logbook_app_079/services/mongo_service.dart';
 import 'package:logbook_app_079/helpers/log_helper.dart';
 
 class LogView extends StatefulWidget {
-  final String username; // ← Dipertahankan agar login_view.dart tidak error
+  final String username;
   const LogView({super.key, required this.username});
 
   @override
@@ -13,12 +15,10 @@ class LogView extends StatefulWidget {
 }
 
 class _LogViewState extends State<LogView> {
-  // ── Controllers ──────────────────────────────────────────
   final TextEditingController _titleCtrl = TextEditingController();
   final TextEditingController _descCtrl = TextEditingController();
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // ── Kategori ─────────────────────────────────────────────
   static const List<String> _categories = [
     'Pekerjaan',
     'Pribadi',
@@ -27,16 +27,13 @@ class _LogViewState extends State<LogView> {
   ];
   String _selectedCategory = 'Pribadi';
 
-  // ── Task 3: Future dikontrol manual untuk auto-refresh ───
   late Future<List<Logbook>> _logsFuture;
-
-  // ── Task 4: Source identifier untuk LogHelper ────────────
   final String _source = "log_view.dart";
-
-  // ── Search query filter client-side ──────────────────────
   String _searchQuery = '';
 
-  // ── Greeting dinamik ─────────────────────────────────────
+  // ── HW 1: Connection Guard state ─────────────────────────
+  bool _isOffline = false;
+
   String get _greeting {
     final h = DateTime.now().hour;
     if (h < 12) return "Selamat Pagi";
@@ -60,12 +57,26 @@ class _LogViewState extends State<LogView> {
   }
 
   // ─────────────────────────────────────────────────────────
-  // LOAD / REFRESH DATA (Task 3)
+  // HW 1: Connection Guard — cek internet sebelum fetch
+  // ─────────────────────────────────────────────────────────
+
+  Future<bool> _checkConnection() async {
+    try {
+      final result = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 5));
+      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // LOAD / REFRESH DATA
   // ─────────────────────────────────────────────────────────
 
   void _loadLogs() {
     setState(() {
-      _logsFuture = MongoService().getLogs();
+      _logsFuture = _fetchWithConnectionGuard();
     });
     LogHelper.writeLog(
       "FutureBuilder: Fetch ulang data dari Atlas.",
@@ -74,7 +85,39 @@ class _LogViewState extends State<LogView> {
     );
   }
 
-  /// Filter client-side berdasarkan search query
+  /// HW 1: Wrap getLogs() dengan pengecekan koneksi terlebih dahulu
+  Future<List<Logbook>> _fetchWithConnectionGuard() async {
+    final bool online = await _checkConnection();
+
+    if (!online) {
+      setState(() => _isOffline = true);
+      LogHelper.writeLog(
+        "OFFLINE: Tidak ada koneksi internet.",
+        source: _source,
+        level: 1,
+      );
+      // Tetap coba fetch — MongoService akan lempar error yang akan ditangkap FutureBuilder
+      throw Exception(
+        "Tidak ada koneksi internet.\nPastikan Wi-Fi atau data seluler aktif, lalu coba lagi.",
+      );
+    }
+
+    setState(() => _isOffline = false);
+    return MongoService().getLogs();
+  }
+
+  /// HW 2: Pull-to-Refresh handler (dipanggil RefreshIndicator)
+  Future<void> _onRefresh() async {
+    LogHelper.writeLog(
+      "Pull-to-Refresh: User menarik layar untuk refresh.",
+      source: _source,
+      level: 3,
+    );
+    _loadLogs();
+    // Tunggu future selesai agar indikator tidak langsung hilang
+    await _logsFuture.catchError((_) {});
+  }
+
   List<Logbook> _applySearch(List<Logbook> logs) {
     if (_searchQuery.trim().isEmpty) return logs;
     final q = _searchQuery.toLowerCase();
@@ -88,6 +131,27 @@ class _LogViewState extends State<LogView> {
   }
 
   // ─────────────────────────────────────────────────────────
+  // HW 3: Timestamp Formatting dengan intl
+  // ─────────────────────────────────────────────────────────
+
+  /// Mengembalikan string seperti:
+  /// "Baru saja", "5 menit yang lalu", "2 jam yang lalu",
+  /// "Kemarin", "25 Jan 2026"
+  String _formatTimestamp(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+
+    if (diff.inSeconds < 60) return "Baru saja";
+    if (diff.inMinutes < 60) return "${diff.inMinutes} menit yang lalu";
+    if (diff.inHours < 24) return "${diff.inHours} jam yang lalu";
+    if (diff.inDays == 1) return "Kemarin";
+    if (diff.inDays < 7) return "${diff.inDays} hari yang lalu";
+
+    // Lebih dari seminggu: format tanggal lokal Indonesia
+    return DateFormat("d MMM yyyy", "id_ID").format(date);
+  }
+
+  // ─────────────────────────────────────────────────────────
   // BUILD
   // ─────────────────────────────────────────────────────────
 
@@ -95,8 +159,6 @@ class _LogViewState extends State<LogView> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF1F5F9),
-
-      // ── APP BAR ──────────────────────────────────────────
       appBar: AppBar(
         backgroundColor: const Color(0xFF1E3A5F),
         foregroundColor: Colors.white,
@@ -117,10 +179,9 @@ class _LogViewState extends State<LogView> {
           ),
         ],
       ),
-
       body: Column(
         children: [
-          // ── HEADER GREETING ────────────────────────────
+          // ── HEADER GREETING ──────────────────────────
           Container(
             width: double.infinity,
             color: const Color(0xFF1E3A5F),
@@ -135,14 +196,49 @@ class _LogViewState extends State<LogView> {
             ),
           ),
 
-          // ── SEARCH BAR ─────────────────────────────────
+          // ── HW 1: OFFLINE WARNING BANNER ─────────────
+          if (_isOffline)
+            Container(
+              width: double.infinity,
+              color: Colors.orange.shade700,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  const Icon(Icons.wifi_off, color: Colors.white, size: 18),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      "Offline Mode — Tidak ada koneksi internet",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _loadLogs,
+                    child: const Text(
+                      "Coba Lagi",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        decoration: TextDecoration.underline,
+                        decorationColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // ── SEARCH BAR ───────────────────────────────
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
               controller: _searchCtrl,
-              onChanged: (val) {
-                setState(() => _searchQuery = val);
-              },
+              onChanged: (val) => setState(() => _searchQuery = val),
               decoration: InputDecoration(
                 hintText: "Cari catatan...",
                 prefixIcon: const Icon(Icons.search, color: Colors.grey),
@@ -157,7 +253,7 @@ class _LogViewState extends State<LogView> {
             ),
           ),
 
-          // ── LIST CATATAN (Task 3: FutureBuilder) ───────
+          // ── LIST CATATAN ─────────────────────────────
           Expanded(
             child: FutureBuilder<List<Logbook>>(
               future: _logsFuture,
@@ -179,7 +275,7 @@ class _LogViewState extends State<LogView> {
                   );
                 }
 
-                // STATE 2: Error koneksi
+                // STATE 2: Error — HW 1: pesan error ramah
                 if (snapshot.hasError) {
                   LogHelper.writeLog(
                     "FutureBuilder Error: ${snapshot.error}",
@@ -188,40 +284,54 @@ class _LogViewState extends State<LogView> {
                   );
                   return Center(
                     child: Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(28),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(
-                            Icons.cloud_off,
-                            size: 64,
-                            color: Colors.red,
+                          Icon(
+                            _isOffline ? Icons.wifi_off : Icons.cloud_off,
+                            size: 72,
+                            color: _isOffline
+                                ? Colors.orange.shade400
+                                : Colors.red.shade300,
                           ),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'Gagal terhubung ke Atlas',
-                            style: TextStyle(
+                          const SizedBox(height: 20),
+                          Text(
+                            _isOffline
+                                ? "Kamu Sedang Offline 📡"
+                                : "Gagal Terhubung ke Server",
+                            style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 10),
                           Text(
-                            '${snapshot.error}',
+                            _isOffline
+                                ? "Aktifkan Wi-Fi atau data seluler,\nlalu tarik layar ke bawah untuk refresh."
+                                : "Server tidak merespons.\nCek koneksi atau coba beberapa saat lagi.",
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 13,
+                              height: 1.6,
                             ),
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 28),
                           ElevatedButton.icon(
                             onPressed: _loadLogs,
                             icon: const Icon(Icons.refresh),
-                            label: const Text('Coba Lagi'),
+                            label: const Text("Coba Lagi"),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF1E3A5F),
                               foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                           ),
                         ],
@@ -234,66 +344,76 @@ class _LogViewState extends State<LogView> {
                 final List<Logbook> allLogs = snapshot.data ?? [];
                 final List<Logbook> logs = _applySearch(allLogs);
 
-                // STATE 3: Kosong (Task 3)
-                if (logs.isEmpty) return _buildEmptyState();
-
-                // STATE 4: Tampilkan list
-                return ListView.builder(
-                  itemCount: logs.length,
-                  itemBuilder: (context, index) {
-                    final Logbook log = logs[index];
-
-                    // SWIPE TO DELETE (dari versi lama)
-                    return Dismissible(
-                      key: Key(
-                        log.id?.toHexString() ??
-                            '${log.title}_${log.date.millisecondsSinceEpoch}',
-                      ),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        margin: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.only(right: 20),
-                        child: const Icon(
-                          Icons.delete,
-                          color: Colors.white,
-                        ),
-                      ),
-                      onDismissed: (_) async {
-                        if (log.id != null) {
-                          await MongoService().deleteLog(log.id!);
-                        }
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('"${log.title}" dihapus'),
-                            backgroundColor: Colors.red.shade700,
+                // HW 2: Bungkus semua state sukses dengan RefreshIndicator
+                return RefreshIndicator(
+                  onRefresh: _onRefresh,
+                  color: const Color(0xFF1E3A5F),
+                  strokeWidth: 2.5,
+                  child: logs.isEmpty
+                      // STATE 3: Kosong — bungkus dengan SingleChildScrollView
+                      // agar RefreshIndicator tetap bisa ditarik saat list kosong
+                      ? SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: SizedBox(
+                            height: MediaQuery.of(context).size.height * 0.5,
+                            child: _buildEmptyState(),
                           ),
-                        );
-                        // Task 3: Auto-refresh setelah swipe delete
-                        _loadLogs();
-                      },
-                      child: _LogCard(
-                        log: log,
-                        onEdit: () => _showEditDialog(log),
-                        onDelete: () => _confirmDelete(log),
-                      ),
-                    );
-                  },
+                        )
+                      // STATE 4: Tampilkan list
+                      : ListView.builder(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemCount: logs.length,
+                          itemBuilder: (context, index) {
+                            final Logbook log = logs[index];
+                            return Dismissible(
+                              key: Key(
+                                log.id?.toHexString() ??
+                                    '${log.title}_${log.date.millisecondsSinceEpoch}',
+                              ),
+                              direction: DismissDirection.endToStart,
+                              background: Container(
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.red,
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 20),
+                                child: const Icon(
+                                  Icons.delete,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              onDismissed: (_) async {
+                                if (log.id != null) {
+                                  await MongoService().deleteLog(log.id!);
+                                }
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('"${log.title}" dihapus'),
+                                    backgroundColor: Colors.red.shade700,
+                                  ),
+                                );
+                                _loadLogs();
+                              },
+                              child: _LogCard(
+                                log: log,
+                                timestamp: _formatTimestamp(log.date),
+                                onEdit: () => _showEditDialog(log),
+                                onDelete: () => _confirmDelete(log),
+                              ),
+                            );
+                          },
+                        ),
                 );
               },
             ),
           ),
         ],
       ),
-
-      // ── FAB TAMBAH ─────────────────────────────────────
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddDialog,
         backgroundColor: const Color(0xFF1E3A5F),
@@ -305,7 +425,7 @@ class _LogViewState extends State<LogView> {
   }
 
   // ─────────────────────────────────────────────────────────
-  // EMPTY STATE (gabungan versi lama + Task 3)
+  // EMPTY STATE
   // ─────────────────────────────────────────────────────────
 
   Widget _buildEmptyState() {
@@ -338,14 +458,13 @@ class _LogViewState extends State<LogView> {
   }
 
   // ─────────────────────────────────────────────────────────
-  // DIALOG: TAMBAH LOG
+  // DIALOGS
   // ─────────────────────────────────────────────────────────
 
   void _showAddDialog() {
     _titleCtrl.clear();
     _descCtrl.clear();
     _selectedCategory = 'Pribadi';
-
     showDialog(
       context: context,
       builder: (ctx) => _buildDialog(
@@ -353,31 +472,22 @@ class _LogViewState extends State<LogView> {
         onSave: () async {
           if (_titleCtrl.text.trim().isEmpty) return;
           Navigator.pop(ctx);
-
-          final Logbook newLog = Logbook(
+          await MongoService().insertLog(Logbook(
             title: _titleCtrl.text.trim(),
             description: _descCtrl.text.trim(),
             date: DateTime.now(),
             category: _selectedCategory,
-          );
-
-          await MongoService().insertLog(newLog);
-          // Task 3: Auto-refresh setelah insert
+          ));
           _loadLogs();
         },
       ),
     );
   }
 
-  // ─────────────────────────────────────────────────────────
-  // DIALOG: EDIT LOG
-  // ─────────────────────────────────────────────────────────
-
   void _showEditDialog(Logbook log) {
     _titleCtrl.text = log.title;
     _descCtrl.text = log.description;
     _selectedCategory = log.category ?? 'Pribadi';
-
     showDialog(
       context: context,
       builder: (ctx) => _buildDialog(
@@ -386,26 +496,18 @@ class _LogViewState extends State<LogView> {
         onSave: () async {
           if (_titleCtrl.text.trim().isEmpty) return;
           Navigator.pop(ctx);
-
-          final Logbook updated = Logbook(
+          await MongoService().updateLog(Logbook(
             id: log.id,
             title: _titleCtrl.text.trim(),
             description: _descCtrl.text.trim(),
             date: log.date,
             category: _selectedCategory,
-          );
-
-          await MongoService().updateLog(updated);
-          // Task 3: Auto-refresh setelah update
+          ));
           _loadLogs();
         },
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────
-  // CONFIRM DELETE (via tombol popup menu)
-  // ─────────────────────────────────────────────────────────
 
   void _confirmDelete(Logbook log) {
     showDialog(
@@ -426,10 +528,7 @@ class _LogViewState extends State<LogView> {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              if (log.id != null) {
-                await MongoService().deleteLog(log.id!);
-              }
-              // Task 3: Auto-refresh setelah delete
+              if (log.id != null) await MongoService().deleteLog(log.id!);
               _loadLogs();
             },
             child: const Text("Hapus"),
@@ -438,10 +537,6 @@ class _LogViewState extends State<LogView> {
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────
-  // REUSABLE DIALOG BUILDER (dari versi lama, + dropdown kategori)
-  // ─────────────────────────────────────────────────────────
 
   Widget _buildDialog({
     required String title,
@@ -481,14 +576,9 @@ class _LogViewState extends State<LogView> {
               const SizedBox(height: 6),
               DropdownButtonFormField<String>(
                 value: _selectedCategory,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                ),
+                decoration: const InputDecoration(border: OutlineInputBorder()),
                 items: _categories
-                    .map(
-                      (cat) =>
-                          DropdownMenuItem(value: cat, child: Text(cat)),
-                    )
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                     .toList(),
                 onChanged: (val) {
                   if (val != null) {
@@ -516,10 +606,6 @@ class _LogViewState extends State<LogView> {
       ),
     );
   }
-
-  // ─────────────────────────────────────────────────────────
-  // DIALOG LOGOUT (dari versi lama)
-  // ─────────────────────────────────────────────────────────
 
   void _showLogoutDialog() {
     showDialog(
@@ -558,11 +644,13 @@ class _LogViewState extends State<LogView> {
 
 class _LogCard extends StatelessWidget {
   final Logbook log;
+  final String timestamp; // HW 3: sudah diformat dari luar
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _LogCard({
     required this.log,
+    required this.timestamp,
     required this.onEdit,
     required this.onDelete,
   });
@@ -605,10 +693,7 @@ class _LogCard extends StatelessWidget {
             ),
             if (log.category != null)
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: _categoryColor(log.category),
                   borderRadius: BorderRadius.circular(8),
@@ -632,14 +717,17 @@ class _LogCard extends StatelessWidget {
                 style: const TextStyle(color: Colors.black54),
               ),
             ],
-            const SizedBox(height: 4),
-            Text(
-              '${log.date.day.toString().padLeft(2, '0')}-'
-              '${log.date.month.toString().padLeft(2, '0')}-'
-              '${log.date.year}  '
-              '${log.date.hour.toString().padLeft(2, '0')}:'
-              '${log.date.minute.toString().padLeft(2, '0')}',
-              style: const TextStyle(fontSize: 11, color: Colors.grey),
+            const SizedBox(height: 6),
+            // HW 3: Tampilkan timestamp yang sudah diformat dengan intl
+            Row(
+              children: [
+                const Icon(Icons.access_time, size: 11, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text(
+                  timestamp,
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ],
             ),
           ],
         ),

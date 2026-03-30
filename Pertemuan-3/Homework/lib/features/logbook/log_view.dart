@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import '../auth/login_view.dart';
 import 'log_controller.dart';
 import 'models/log_model.dart';
@@ -166,21 +167,44 @@ class _LogViewState extends State<LogView> {
   // ===== EMPTY STATE =====
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.note_add_outlined, size: 80, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
-          Text(
-            _searchCtrl.text.isEmpty ? "Belum ada catatan" : "Catatan tidak ditemukan",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey.shade500),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _searchCtrl.text.isEmpty ? "Tap tombol + untuk mulai mencatat 🚀" : "Coba kata kunci lain",
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
-          ),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Menampilkan animasi Lottie
+            Lottie.network(
+              'https://lottie.host/4be2f986-5093-468a-946a-720eb20154ad/Z8t01bhSbi.lottie',
+              width: 250,
+              height: 250,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                // Cadangan jika gagal muat (misal tidak ada internet)
+                return Icon(Icons.note_add_outlined, size: 80, color: Colors.grey.shade300);
+              },
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _searchCtrl.text.isEmpty 
+                  ? "Belum ada aktivitas hari ini?" 
+                  : "Catatan tidak ditemukan",
+              style: TextStyle(
+                  fontSize: 18, 
+                  fontWeight: FontWeight.bold, 
+                  color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _searchCtrl.text.isEmpty 
+                  ? "Mulai catat kemajuan proyek Anda!" 
+                  : "Coba kata kunci lain",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 14, 
+                  color: Colors.grey.shade500),
+            ),
+          ],
+        ),
       ),
     );
   }

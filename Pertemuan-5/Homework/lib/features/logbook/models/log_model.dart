@@ -15,19 +15,24 @@ class LogModel {
   final String description;
 
   @HiveField(3)
-  final String timestamp; // tetap pakai timestamp, bukan date
+  final String timestamp; 
 
   @HiveField(4)
-  final String category; // tetap pakai category milikmu
+  final String category; 
 
   @HiveField(5)
-  final String authorId; // tambahan dari modul (collaborative)
+  final String authorId; 
 
   @HiveField(6)
   final String teamId;
 
   @HiveField(7)
-  final bool isPublic; // ← TASK 5: visibilitas catatan
+  final bool isPublic; 
+
+  // --- TAMBAHAN UNTUK HOMEWORK: KATEGORI WARNA ---
+  @HiveField(8)
+  final int colorCode; 
+  // -----------------------------------------------
 
   LogModel({
     this.id,
@@ -37,7 +42,8 @@ class LogModel {
     this.category = 'Pribadi',
     required this.authorId,
     required this.teamId,
-    this.isPublic = false, // ← default: Private
+    this.isPublic = false, 
+    this.colorCode = 0xFF9E9E9E, // Default warna Abu-abu (Colors.grey)
   });
 
   factory LogModel.fromMap(Map<String, dynamic> map) {
@@ -49,21 +55,31 @@ class LogModel {
       category: map['category'] ?? 'Pribadi',
       authorId: map['authorId'] ?? 'unknown_user',
       teamId: map['teamId'] ?? 'no_team',
-      isPublic: map['isPublic'] ?? false, // ← TASK 5
+      isPublic: map['isPublic'] ?? false, 
+      // Parse color code dari MongoDB jika ada, jika tidak pakai abu-abu
+      colorCode: map['colorCode'] ?? 0xFF9E9E9E, 
     );
   }
 
   Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{
+    final map = {
       'title': title,
       'description': description,
       'timestamp': timestamp,
       'category': category,
       'authorId': authorId,
       'teamId': teamId,
-      'isPublic': isPublic, // ← TASK 5
+      'isPublic': isPublic,
+      'colorCode': colorCode, // Simpan color code ke database
     };
-    if (id != null) map['_id'] = ObjectId.parse(id!);
+
+    if (id != null && id!.isNotEmpty) {
+      try {
+        map['_id'] = ObjectId.fromHexString(id!);
+      } catch (e) {
+        // Abaikan jika ID tidak valid
+      }
+    }
     return map;
   }
 }

@@ -9,6 +9,8 @@ import 'package:logbook_app_079/helpers/log_helper.dart';
 import 'package:logbook_app_079/features/logbook/log_editor_page.dart';
 import 'package:logbook_app_079/features/logbook/log_controller.dart';
 import 'package:logbook_app_079/features/logbook/models/log_model.dart';
+import 'package:lottie/lottie.dart';
+
 class LogView extends StatefulWidget {
   final String username;
   final String userId;
@@ -173,6 +175,42 @@ class _LogViewState extends State<LogView> {
     if (diff.inDays == 1) return "Kemarin";
     if (diff.inDays < 7) return "${diff.inDays} hari yang lalu";
     return DateFormat("d MMM yyyy", "id_ID").format(date);
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Menampilkan animasi Lottie dari URL yang kamu berikan
+            Lottie.network(
+              'https://lottie.host/embed/4be2f986-5093-468a-946a-720eb20154ad/Z8t01bhSbi.lottie',
+              width: 250,
+              height: 250,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                // Jika internet mati atau gagal load, tampilkan icon sebagai cadangan
+                return const Icon(Icons.inbox_outlined, size: 100, color: Colors.grey);
+              },
+            ),
+            const SizedBox(height: 16),
+            // Teks instruksional sesuai permintaan tugas
+            Text(
+              "Belum ada aktivitas hari ini?\nMulai catat kemajuan proyek Anda!",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -473,34 +511,6 @@ class _LogViewState extends State<LogView> {
     );
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.note_add_outlined, size: 80, color: Colors.grey.shade300),
-          const SizedBox(height: 16),
-          Text(
-            _searchCtrl.text.isEmpty
-                ? "Belum ada catatan"
-                : "Catatan tidak ditemukan",
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.grey.shade500,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _searchCtrl.text.isEmpty
-                ? "Tap tombol + untuk mulai mencatat"
-                : "Coba kata kunci lain",
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _goToEditor({LogModel? log}) {
     Navigator.push(

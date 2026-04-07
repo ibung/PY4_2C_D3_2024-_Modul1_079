@@ -43,7 +43,9 @@ class _LogEditorPageState extends State<LogEditorPage> {
   void initState() {
     super.initState();
     _titleController = TextEditingController(text: widget.log?.title ?? '');
-    _descController = TextEditingController(text: widget.log?.description ?? '');
+    _descController = TextEditingController(
+      text: widget.log?.description ?? '',
+    );
     _selectedCategory = widget.log?.category ?? 'Pribadi';
     _isPublic = widget.log?.isPublic ?? false; // ← TASK 5
 
@@ -113,7 +115,7 @@ class _LogEditorPageState extends State<LogEditorPage> {
             IconButton(
               icon: const Icon(Icons.save),
               tooltip: 'Simpan',
-              onPressed: _save,
+              onPressed: () => _save(),
             ),
           ],
           bottom: const TabBar(
@@ -191,7 +193,9 @@ class _LogEditorPageState extends State<LogEditorPage> {
                             ? 'Semua anggota tim bisa melihat'
                             : 'Hanya kamu yang bisa melihat',
                         style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade600),
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
                       activeColor: const Color(0xFF1E3A5F),
                     ),
@@ -201,15 +205,16 @@ class _LogEditorPageState extends State<LogEditorPage> {
                   // Hint Markdown
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.blue.shade50,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text(
                       '💡 Mendukung format Markdown: **tebal**, *miring*, # Judul, - list',
-                      style:
-                          TextStyle(fontSize: 11, color: Colors.blueGrey),
+                      style: TextStyle(fontSize: 11, color: Colors.blueGrey),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -254,8 +259,11 @@ class _LogEditorPageState extends State<LogEditorPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.preview_outlined,
-                            size: 64, color: Colors.grey.shade300),
+                        Icon(
+                          Icons.preview_outlined,
+                          size: 64,
+                          color: Colors.grey.shade300,
+                        ),
                         const SizedBox(height: 12),
                         Text(
                           'Belum ada konten untuk ditampilkan',

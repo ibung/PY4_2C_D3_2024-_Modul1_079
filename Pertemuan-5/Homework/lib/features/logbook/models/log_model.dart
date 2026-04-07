@@ -51,13 +51,13 @@ class LogModel {
       id: map['_id'] != null ? map['_id'].toString() : null,
       title: map['title'] ?? '',
       description: map['description'] ?? '',
+      // Support both 'timestamp' and legacy 'date' field names
       timestamp: map['timestamp'] ?? map['date'] ?? '',
       category: map['category'] ?? 'Pribadi',
       authorId: map['authorId'] ?? 'unknown_user',
       teamId: map['teamId'] ?? 'no_team',
-      isPublic: map['isPublic'] ?? false, 
-      // Parse color code dari MongoDB jika ada, jika tidak pakai abu-abu
-      colorCode: map['colorCode'] ?? 0xFF9E9E9E, 
+      isPublic: map['isPublic'] ?? false,
+      colorCode: map['colorCode'] ?? 0xFF9E9E9E,
     );
   }
 

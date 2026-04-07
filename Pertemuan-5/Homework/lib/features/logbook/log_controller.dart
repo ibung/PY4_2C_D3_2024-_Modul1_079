@@ -14,7 +14,7 @@ class LogController {
 
   String currentUserId = '';
   String currentUserRole = 'Anggota';
-  String currentTeamId = 'tim_079'; // ← POIN 2
+  String currentTeamId = '';
 
   Box<LogModel> get _myBox => Hive.box<LogModel>('offline_logs');
 

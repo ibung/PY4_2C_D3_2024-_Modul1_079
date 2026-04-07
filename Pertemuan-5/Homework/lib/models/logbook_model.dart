@@ -26,11 +26,11 @@ class Logbook {
       '_id': id ?? ObjectId(),
       'title': title,
       'description': description,
-      'date': date.toIso8601String(),
+      'timestamp': date.toIso8601String(), // unified key, same as LogModel
       if (category != null) 'category': category,
       if (authorId != null) 'authorId': authorId,
       if (teamId != null) 'teamId': teamId,
-      'isPublic': isPublic ?? false, // ← TASK 5
+      'isPublic': isPublic ?? false,
     };
   }
 
@@ -42,17 +42,20 @@ class Logbook {
       parsedId = ObjectId.parse(map['_id'] as String);
     }
 
+    // Support both 'timestamp' (LogModel) and 'date' (Logbook) field names
+    final rawDate = map['timestamp'] ?? map['date'];
+
     return Logbook(
       id: parsedId,
       title: map['title'] as String? ?? '',
       description: map['description'] as String? ?? '',
-      date: map['date'] != null
-          ? DateTime.parse(map['date'] as String)
+      date: rawDate != null
+          ? DateTime.tryParse(rawDate.toString()) ?? DateTime.now()
           : DateTime.now(),
       category: map['category'] as String?,
       authorId: map['authorId'] as String?,
       teamId: map['teamId'] as String?,
-      isPublic: map['isPublic'] as bool? ?? false, // ← TASK 5
+      isPublic: map['isPublic'] as bool? ?? false,
     );
   }
 

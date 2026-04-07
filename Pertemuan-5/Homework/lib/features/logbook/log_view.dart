@@ -2,8 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:intl/intl.dart';
+import 'package:mongo_dart/mongo_dart.dart' show ObjectId;
 import '../auth/login_view.dart';
-import 'package:logbook_app_079/models/logbook_model.dart';
 import 'package:logbook_app_079/services/mongo_service.dart';
 import 'package:logbook_app_079/helpers/log_helper.dart';
 import 'package:logbook_app_079/features/logbook/log_editor_page.dart';
@@ -15,7 +15,7 @@ class LogView extends StatefulWidget {
   final String username;
   final String userId;
   final String userRole;
-  final String teamId; // ← tim user
+  final String teamId;
 
   const LogView({
     super.key,
@@ -30,20 +30,13 @@ class LogView extends StatefulWidget {
 }
 
 class _LogViewState extends State<LogView> {
-  final TextEditingController _titleCtrl = TextEditingController();
-  final TextEditingController _descCtrl = TextEditingController();
   final TextEditingController _searchCtrl = TextEditingController();
-
-  static const List<String> _categories = [
-    'Mechanical', 'Electronic', 'Software',
-    'Pekerjaan', 'Pribadi', 'Urgent', 'Lainnya',
-  ];
-  String _selectedCategory = 'Software';
 
   late String _currentUserId;
   late String _currentUserRole;
 
-  late Future<List<Logbook>> _logsFuture;
+  // ✅ FIX: Inisial dengan Future.value([]) untuk hindari Late Initialization Error
+  late Future<List<LogModel>> _logsFuture = Future.value([]);
   late final LogController _logController;
 
   final String _source = "log_view.dart";
@@ -67,23 +60,22 @@ class _LogViewState extends State<LogView> {
     _logController = LogController()
       ..currentUserId = _currentUserId
       ..currentUserRole = _currentUserRole
-      ..currentTeamId = widget.teamId; // ← POIN 2: set teamId
+      ..currentTeamId = widget.teamId;
     _logController.startConnectivityListener(widget.teamId);
     _loadLogs();
   }
 
   @override
   void dispose() {
-    _titleCtrl.dispose();
-    _descCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
 
   Future<bool> _checkConnection() async {
     try {
-      final result = await InternetAddress.lookup('google.com')
-          .timeout(const Duration(seconds: 5));
+      final result = await InternetAddress.lookup(
+        'google.com',
+      ).timeout(const Duration(seconds: 5));
       return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
     } catch (_) {
       return false;
@@ -91,9 +83,11 @@ class _LogViewState extends State<LogView> {
   }
 
   void _loadLogs() {
-    setState(() {
-      _logsFuture = _fetchWithConnectionGuard();
-    });
+    // ✅ FIX: Panggil _fetchLogs() di luar setState dulu,
+    //         baru assign Future-nya ke dalam setState.
+    //         setState TIDAK boleh menerima closure yang return Future.
+    final future = _fetchLogs();
+    setState(() => _logsFuture = future);
     LogHelper.writeLog(
       "FutureBuilder: Fetch ulang data dari Atlas.",
       source: _source,
@@ -101,72 +95,72 @@ class _LogViewState extends State<LogView> {
     );
   }
 
-  Future<List<Logbook>> _fetchWithConnectionGuard() async {
+  // ─── FETCH (PERBAIKAN UTAMA) ──────────────────────────────────────────────
+  // BUG LAMA: fetch lewat _logController.loadLogs() lalu baca logsNotifier.value
+  //           → nilainya tidak dijamin sinkron, bisa kembalikan data Hive lama.
+  // FIX: ambil langsung dari MongoService, update notifier di background.
+  Future<List<LogModel>> _fetchLogs() async {
     final bool online = await _checkConnection();
 
     if (!online) {
-      setState(() => _isOffline = true);
+      if (mounted) setState(() => _isOffline = true);
       LogHelper.writeLog(
         "OFFLINE: Tidak ada koneksi, memuat dari Hive cache.",
         source: _source,
         level: 1,
       );
       final hiveData = _logController.logsNotifier.value;
-      if (hiveData.isNotEmpty) {
-        return hiveData.map((lm) => Logbook(
-          title: lm.title,
-          description: lm.description,
-          date: DateTime.tryParse(lm.timestamp) ?? DateTime.now(),
-          category: lm.category,
-          authorId: lm.authorId,
-          teamId: lm.teamId,
-          isPublic: lm.isPublic,
-        )).toList();
-      }
+      if (hiveData.isNotEmpty) return hiveData;
       throw Exception(
-        "Tidak ada koneksi internet.\nPastikan Wi-Fi atau data seluler aktif, lalu coba lagi.",
+        "Tidak ada koneksi internet.\n"
+        "Pastikan Wi-Fi atau data seluler aktif, lalu coba lagi.",
       );
     }
 
-    setState(() => _isOffline = false);
-    // Pakai getLogsByTeam agar filter tim & isPublic konsisten
-    await _logController.loadLogs(widget.teamId);
-    final logModels = _logController.logsNotifier.value;
-    return logModels.map((lm) => Logbook(
-      title: lm.title,
-      description: lm.description,
-      date: DateTime.tryParse(lm.timestamp) ?? DateTime.now(),
-      category: lm.category,
-      authorId: lm.authorId,
-      teamId: lm.teamId,
-      isPublic: lm.isPublic,
-    )).toList();
+    if (mounted) setState(() => _isOffline = false);
+
+    // Ambil langsung dari Atlas — hasilnya pasti sinkron
+    final List<LogModel> cloudData = await MongoService().getLogsByTeam(
+      widget.teamId,
+    );
+
+    // Update notifier di background (tidak block return)
+    _logController.logsNotifier.value = cloudData;
+
+    return cloudData;
   }
 
   Future<void> _onRefresh() async {
     _loadLogs();
-    await _logsFuture.catchError((_) {});
+    await _logsFuture.catchError((_) => <LogModel>[]);
   }
 
-  List<Logbook> _applyVisibility(List<Logbook> logs) {
+  // ─── FILTER VISIBILITY ────────────────────────────────────────────────────
+  // BUG LAMA: isPublic null → default true, jadi semua log orang lain ikut tampil.
+  // FIX: tampilkan hanya milik sendiri ATAU yang benar-benar isPublic == true.
+  List<LogModel> _applyVisibility(List<LogModel> logs) {
     return logs.where((log) {
-      final isOwner = log.authorId == _currentUserId;
-      final isPublic = log.isPublic ?? true;
-      return isOwner || isPublic;
+      final isOwner =
+          log.authorId.trim().toLowerCase() ==
+          _currentUserId.trim().toLowerCase();
+      return isOwner || log.isPublic;
     }).toList();
   }
 
-  List<Logbook> _applySearch(List<Logbook> logs) {
+  List<LogModel> _applySearch(List<LogModel> logs) {
     if (_searchQuery.trim().isEmpty) return logs;
     final q = _searchQuery.toLowerCase();
     return logs
-        .where((l) =>
-            l.title.toLowerCase().contains(q) ||
-            l.description.toLowerCase().contains(q))
+        .where(
+          (l) =>
+              l.title.toLowerCase().contains(q) ||
+              l.description.toLowerCase().contains(q),
+        )
         .toList();
   }
 
-  String _formatTimestamp(DateTime date) {
+  String _formatTimestamp(String timestamp) {
+    final date = DateTime.tryParse(timestamp) ?? DateTime.now();
     final now = DateTime.now();
     final diff = now.difference(date);
     if (diff.inSeconds < 60) return "Baru saja";
@@ -184,19 +178,18 @@ class _LogViewState extends State<LogView> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Menampilkan animasi Lottie dari URL yang kamu berikan
             Lottie.network(
               'https://lottie.host/embed/4be2f986-5093-468a-946a-720eb20154ad/Z8t01bhSbi.lottie',
               width: 250,
               height: 250,
               fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) {
-                // Jika internet mati atau gagal load, tampilkan icon sebagai cadangan
-                return const Icon(Icons.inbox_outlined, size: 100, color: Colors.grey);
-              },
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.inbox_outlined,
+                size: 100,
+                color: Colors.grey,
+              ),
             ),
             const SizedBox(height: 16),
-            // Teks instruksional sesuai permintaan tugas
             Text(
               "Belum ada aktivitas hari ini?\nMulai catat kemajuan proyek Anda!",
               textAlign: TextAlign.center,
@@ -237,7 +230,10 @@ class _LogViewState extends State<LogView> {
             child: Text(
               _currentUserRole,
               style: const TextStyle(
-                  fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
           ),
           const SizedBox(width: 4),
@@ -268,7 +264,6 @@ class _LogViewState extends State<LogView> {
               ),
             ),
           ),
-
           if (_isOffline)
             Container(
               width: double.infinity,
@@ -304,7 +299,6 @@ class _LogViewState extends State<LogView> {
                 ],
               ),
             ),
-
           Padding(
             padding: const EdgeInsets.all(12),
             child: TextField(
@@ -323,9 +317,8 @@ class _LogViewState extends State<LogView> {
               ),
             ),
           ),
-
           Expanded(
-            child: FutureBuilder<List<Logbook>>(
+            child: FutureBuilder<List<LogModel>>(
               future: _logsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -389,9 +382,12 @@ class _LogViewState extends State<LogView> {
                               backgroundColor: const Color(0xFF1E3A5F),
                               foregroundColor: Colors.white,
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 24, vertical: 12),
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12)),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
                           ),
                         ],
@@ -400,9 +396,9 @@ class _LogViewState extends State<LogView> {
                   );
                 }
 
-                final List<Logbook> allLogs = snapshot.data ?? [];
-                final List<Logbook> visibleLogs = _applyVisibility(allLogs);
-                final List<Logbook> logs = _applySearch(visibleLogs);
+                final List<LogModel> allLogs = snapshot.data ?? [];
+                final List<LogModel> visibleLogs = _applyVisibility(allLogs);
+                final List<LogModel> logs = _applySearch(visibleLogs);
 
                 return RefreshIndicator(
                   onRefresh: _onRefresh,
@@ -420,47 +416,55 @@ class _LogViewState extends State<LogView> {
                           physics: const AlwaysScrollableScrollPhysics(),
                           itemCount: logs.length,
                           itemBuilder: (context, index) {
-                            final Logbook log = logs[index];
+                            final LogModel log = logs[index];
                             return Dismissible(
-                              key: Key(
-                                log.id?.toHexString() ??
-                                    '${log.title}_${log.date.millisecondsSinceEpoch}',
-                              ),
+                              key: Key(log.id ?? '${log.title}_$index'),
                               direction: DismissDirection.endToStart,
                               background: Container(
                                 margin: const EdgeInsets.symmetric(
-                                    horizontal: 16, vertical: 6),
+                                  horizontal: 16,
+                                  vertical: 6,
+                                ),
                                 decoration: BoxDecoration(
                                   color: Colors.red,
                                   borderRadius: BorderRadius.circular(14),
                                 ),
                                 alignment: Alignment.centerRight,
                                 padding: const EdgeInsets.only(right: 20),
-                                child: const Icon(Icons.delete,
-                                    color: Colors.white),
+                                child: const Icon(
+                                  Icons.delete,
+                                  color: Colors.white,
+                                ),
                               ),
                               onDismissed: (_) async {
-                                final isOwner = log.authorId == _currentUserId;
+                                final isOwner =
+                                    log.authorId.trim().toLowerCase() ==
+                                    _currentUserId.trim().toLowerCase();
                                 if (!isOwner) {
                                   _loadLogs();
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
                                       content: Text(
-                                          'Hanya pemilik catatan yang bisa menghapus'),
+                                        'Hanya pemilik catatan yang bisa menghapus',
+                                      ),
                                       backgroundColor: Colors.red,
                                     ),
                                   );
                                   return;
                                 }
-                                if (log.id != null) {
-                                  await MongoService().deleteLog(log.id!);
-                                }
                                 final hiveIndex = _logController
-                                    .logsNotifier.value
-                                    .indexWhere(
-                                        (l) => l.id == log.id?.toHexString());
+                                    .logsNotifier
+                                    .value
+                                    .indexWhere((l) => l.id == log.id);
                                 if (hiveIndex != -1) {
                                   await _logController.removeLog(hiveIndex);
+                                }
+                                if (log.id != null) {
+                                  try {
+                                    await MongoService().deleteLog(
+                                      ObjectId.fromHexString(log.id!),
+                                    );
+                                  } catch (_) {}
                                 }
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -474,21 +478,8 @@ class _LogViewState extends State<LogView> {
                               },
                               child: _LogCard(
                                 log: log,
-                                timestamp: _formatTimestamp(log.date),
-                                onEdit: () {
-                                  _goToEditor(
-                                    log: LogModel(
-                                      id: log.id?.toHexString(),
-                                      title: log.title,
-                                      description: log.description,
-                                      timestamp: log.date.toIso8601String(),
-                                      category: log.category ?? 'Software',
-                                      authorId: log.authorId ?? _currentUserId,
-                                      teamId: log.teamId ?? widget.teamId,
-                                      isPublic: log.isPublic ?? false,
-                                    ),
-                                  );
-                                },
+                                timestamp: _formatTimestamp(log.timestamp),
+                                onEdit: () => _goToEditor(log: log),
                                 onDelete: () => _confirmDelete(log),
                                 currentUserId: _currentUserId,
                               ),
@@ -511,7 +502,6 @@ class _LogViewState extends State<LogView> {
     );
   }
 
-
   void _goToEditor({LogModel? log}) {
     Navigator.push(
       context,
@@ -527,8 +517,10 @@ class _LogViewState extends State<LogView> {
     ).then((_) => _loadLogs());
   }
 
-  void _confirmDelete(Logbook log) {
-    final isOwner = log.authorId == _currentUserId;
+  void _confirmDelete(LogModel log) {
+    final isOwner =
+        log.authorId.trim().toLowerCase() ==
+        _currentUserId.trim().toLowerCase();
     if (!isOwner) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -538,7 +530,6 @@ class _LogViewState extends State<LogView> {
       );
       return;
     }
-
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -557,11 +548,18 @@ class _LogViewState extends State<LogView> {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              if (log.id != null) await MongoService().deleteLog(log.id!);
-              final hiveIndex = _logController.logsNotifier.value
-                  .indexWhere((l) => l.id == log.id?.toHexString());
+              final hiveIndex = _logController.logsNotifier.value.indexWhere(
+                (l) => l.id == log.id,
+              );
               if (hiveIndex != -1) {
                 await _logController.removeLog(hiveIndex);
+              }
+              if (log.id != null) {
+                try {
+                  await MongoService().deleteLog(
+                    ObjectId.fromHexString(log.id!),
+                  );
+                } catch (_) {}
               }
               _loadLogs();
             },
@@ -592,8 +590,10 @@ class _LogViewState extends State<LogView> {
                 MaterialPageRoute(builder: (_) => const LoginView()),
               );
             },
-            child: const Text("Ya, Keluar",
-                style: TextStyle(color: Colors.red)),
+            child: const Text(
+              "Ya, Keluar",
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
@@ -601,12 +601,12 @@ class _LogViewState extends State<LogView> {
   }
 }
 
-// ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 // WIDGET: CARD ITEM LOG
-// ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _LogCard extends StatelessWidget {
-  final Logbook log;
+  final LogModel log;
   final String timestamp;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -620,58 +620,86 @@ class _LogCard extends StatelessWidget {
     required this.currentUserId,
   });
 
-  Color _categoryColor(String? cat) {
+  Color _categoryColor(String cat) {
     switch (cat) {
-      case 'Mechanical': return Colors.green.shade100;
-      case 'Electronic': return Colors.blue.shade100;
-      case 'Software':   return Colors.purple.shade100;
-      case 'Urgent':     return Colors.red.shade100;
-      case 'Pekerjaan':  return Colors.orange.shade100;
-      case 'Pribadi':    return Colors.teal.shade100;
-      default:           return Colors.grey.shade200;
+      case 'Mechanical':
+        return Colors.green.shade100;
+      case 'Electronic':
+        return Colors.blue.shade100;
+      case 'Software':
+        return Colors.purple.shade100;
+      case 'Urgent':
+        return Colors.red.shade100;
+      case 'Pekerjaan':
+        return Colors.orange.shade100;
+      case 'Pribadi':
+        return Colors.teal.shade100;
+      default:
+        return Colors.grey.shade200;
     }
   }
 
-  Color _categoryBorderColor(String? cat) {
+  Color _categoryBorderColor(String cat) {
     switch (cat) {
-      case 'Mechanical': return Colors.green.shade400;
-      case 'Electronic': return Colors.blue.shade400;
-      case 'Software':   return Colors.purple.shade400;
-      case 'Urgent':     return Colors.red.shade400;
-      case 'Pekerjaan':  return Colors.orange.shade400;
-      case 'Pribadi':    return Colors.teal.shade400;
-      default:           return Colors.grey.shade400;
+      case 'Mechanical':
+        return Colors.green.shade400;
+      case 'Electronic':
+        return Colors.blue.shade400;
+      case 'Software':
+        return Colors.purple.shade400;
+      case 'Urgent':
+        return Colors.red.shade400;
+      case 'Pekerjaan':
+        return Colors.orange.shade400;
+      case 'Pribadi':
+        return Colors.teal.shade400;
+      default:
+        return Colors.grey.shade400;
     }
   }
 
-  Color _categoryTextColor(String? cat) {
+  Color _categoryTextColor(String cat) {
     switch (cat) {
-      case 'Mechanical': return Colors.green.shade800;
-      case 'Electronic': return Colors.blue.shade800;
-      case 'Software':   return Colors.purple.shade800;
-      case 'Urgent':     return Colors.red.shade800;
-      case 'Pekerjaan':  return Colors.orange.shade800;
-      case 'Pribadi':    return Colors.teal.shade800;
-      default:           return Colors.grey.shade700;
+      case 'Mechanical':
+        return Colors.green.shade800;
+      case 'Electronic':
+        return Colors.blue.shade800;
+      case 'Software':
+        return Colors.purple.shade800;
+      case 'Urgent':
+        return Colors.red.shade800;
+      case 'Pekerjaan':
+        return Colors.orange.shade800;
+      case 'Pribadi':
+        return Colors.teal.shade800;
+      default:
+        return Colors.grey.shade700;
     }
   }
 
-  IconData _categoryIcon(String? cat) {
+  IconData _categoryIcon(String cat) {
     switch (cat) {
-      case 'Mechanical': return Icons.settings;
-      case 'Electronic': return Icons.electrical_services;
-      case 'Software':   return Icons.code;
-      case 'Urgent':     return Icons.priority_high;
-      case 'Pekerjaan':  return Icons.work_outline;
-      case 'Pribadi':    return Icons.person_outline;
-      default:           return Icons.label_outline;
+      case 'Mechanical':
+        return Icons.settings;
+      case 'Electronic':
+        return Icons.electrical_services;
+      case 'Software':
+        return Icons.code;
+      case 'Urgent':
+        return Icons.priority_high;
+      case 'Pekerjaan':
+        return Icons.work_outline;
+      case 'Pribadi':
+        return Icons.person_outline;
+      default:
+        return Icons.label_outline;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isOwner = log.authorId == currentUserId;
-    final isPublic = log.isPublic ?? false;
+    final isOwner =
+        log.authorId.trim().toLowerCase() == currentUserId.trim().toLowerCase();
 
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -681,15 +709,17 @@ class _LogCard extends StatelessWidget {
         decoration: BoxDecoration(
           border: Border(
             left: BorderSide(
-              color: _categoryBorderColor(log.category), // ← warna solid
+              color: _categoryBorderColor(log.category),
               width: 5,
             ),
           ),
           borderRadius: BorderRadius.circular(14),
         ),
         child: ListTile(
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
           leading: CircleAvatar(
             backgroundColor: const Color(0xFF1E3A5F).withOpacity(0.1),
             child: Icon(
@@ -701,49 +731,46 @@ class _LogCard extends StatelessWidget {
           title: Row(
             children: [
               Expanded(
-                child: Text(log.title,
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                child: Text(
+                  log.title,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
-              // Badge visibilitas
+              Tooltip(
+                message: log.isPublic ? 'Publik' : 'Privat',
+                child: Icon(
+                  log.isPublic ? Icons.public : Icons.lock_outline,
+                  size: 14,
+                  color: log.isPublic ? Colors.green.shade600 : Colors.grey,
+                ),
+              ),
+              const SizedBox(width: 4),
               Container(
-                margin: const EdgeInsets.only(right: 4),
-                child: Tooltip(
-                  message: isPublic ? 'Publik' : 'Privat',
-                  child: Icon(
-                    isPublic ? Icons.public : Icons.lock_outline,
-                    size: 14,
-                    color: isPublic ? Colors.green.shade600 : Colors.grey,
-                  ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _categoryColor(log.category),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _categoryIcon(log.category),
+                      size: 10,
+                      color: _categoryTextColor(log.category),
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      log.category,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: _categoryTextColor(log.category),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              if (log.category != null)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: _categoryColor(log.category),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _categoryIcon(log.category),
-                        size: 10,
-                        color: _categoryTextColor(log.category),
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        log.category!,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: _categoryTextColor(log.category),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
             ],
           ),
           subtitle: Column(
@@ -751,18 +778,15 @@ class _LogCard extends StatelessWidget {
             children: [
               if (log.description.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                // ── Potong maksimal 3 baris, sisanya "..." ──
                 LayoutBuilder(
-                  builder: (context, constraints) {
-                    // Ambil max 3 baris dari teks
+                  builder: (context, _) {
                     final lines = log.description.split('\n');
                     final preview = lines.take(3).join('\n');
-                    final isTruncated = lines.length > 3 ||
-                        log.description.length > 120;
+                    final isTruncated =
+                        lines.length > 3 || log.description.length > 120;
                     final displayText = isTruncated
                         ? '${preview.length > 120 ? preview.substring(0, 120) : preview}...'
                         : preview;
-
                     return MarkdownBody(
                       data: displayText,
                       styleSheet: MarkdownStyleSheet(
@@ -771,9 +795,6 @@ class _LogCard extends StatelessWidget {
                           color: Colors.black54,
                           height: 1.4,
                         ),
-                        h1: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                        h2: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                        listBullet: const TextStyle(fontSize: 13, color: Colors.black54),
                         strong: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.black87,
@@ -794,14 +815,14 @@ class _LogCard extends StatelessWidget {
                 children: [
                   const Icon(Icons.access_time, size: 11, color: Colors.grey),
                   const SizedBox(width: 4),
-                  Text(timestamp,
-                      style:
-                          const TextStyle(fontSize: 11, color: Colors.grey)),
+                  Text(
+                    timestamp,
+                    style: const TextStyle(fontSize: 11, color: Colors.grey),
+                  ),
                   const Spacer(),
                   Text(
-                    "by ${log.authorId ?? 'unknown'} · ${log.teamId ?? '-'}",
-                    style: TextStyle(
-                        fontSize: 10, color: Colors.grey.shade400),
+                    "by ${log.authorId} · ${log.teamId}",
+                    style: TextStyle(fontSize: 10, color: Colors.grey.shade400),
                   ),
                 ],
               ),
@@ -817,8 +838,7 @@ class _LogCard extends StatelessWidget {
                     const PopupMenuItem(value: 'edit', child: Text('Edit')),
                     const PopupMenuItem(
                       value: 'delete',
-                      child: Text('Hapus',
-                          style: TextStyle(color: Colors.red)),
+                      child: Text('Hapus', style: TextStyle(color: Colors.red)),
                     ),
                   ],
                 )

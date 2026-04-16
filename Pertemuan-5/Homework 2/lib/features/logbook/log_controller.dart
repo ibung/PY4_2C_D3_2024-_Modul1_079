@@ -12,40 +12,63 @@ class LogController {
   final ValueNotifier<List<LogModel>> logsNotifier = ValueNotifier([]);
   final ValueNotifier<bool> isLoading = ValueNotifier(false);
 
-  String currentUserId = '';
+  String currentUserId   = '';
   String currentUserRole = 'Anggota';
-  String currentTeamId = '';
+  String currentTeamId   = '';
 
   Box<LogModel> get _myBox => Hive.box<LogModel>('offline_logs');
 
-  // ─── LOAD (Offline-First) ────────────────────────────────
+  // ─── FR-03 FIX: Inject user session sebelum operasi apapun ──────────────────
+  /// Panggil method ini tepat setelah login berhasil, sebelum loadLogs().
+  /// Contoh di screen:
+  ///   controller.setCurrentUser(
+  ///     userId  : username,
+  ///     role    : loginController.getRoleFor(username),
+  ///     teamId  : loginController.getTeamIdFor(username),
+  ///   );
+  void setCurrentUser({
+    required String userId,
+    required String role,
+    required String teamId,
+  }) {
+    currentUserId   = userId;
+    currentUserRole = role;
+    currentTeamId   = teamId;
+  }
+
+  // ─── LOAD (Offline-First + FR-04 Team Isolation) ─────────────────────────────
   Future<void> loadLogs(String teamId) async {
     currentTeamId = teamId;
 
-    // Tampilkan data lokal dulu (termasuk yang belum sync)
-    logsNotifier.value = _myBox.values.toList();
+    // FR-04: Hive lokal difilter by teamId agar data tim lain tidak bocor
+    final localFiltered = _myBox.values
+        .where((log) => AccessControlService.isTeamMember(teamId, log.teamId))
+        .toList();
+    logsNotifier.value = localFiltered;
 
     try {
+      // MongoDB sudah filter by teamId via getLogsByTeam()
       final cloudData = await MongoService().getLogsByTeam(teamId);
 
-      // Ambil data lokal yang BELUM tersinkron sebelum clear
+      // Ambil pending lokal yang belum sync (dan milik tim ini)
       final pendingData = _myBox.values
-          .where((log) => !log.isSynced)
+          .where((log) => !log.isSynced &&
+              AccessControlService.isTeamMember(teamId, log.teamId))
           .toList();
 
-      // Hapus hanya data yang sudah sync (aman di-replace dari cloud)
+      // Hapus hanya data yang sudah sync (milik tim ini)
       final keysToDelete = _myBox.values
-          .where((log) => log.isSynced)
+          .where((log) =>
+              log.isSynced &&
+              AccessControlService.isTeamMember(teamId, log.teamId))
           .map((log) => log.key)
           .toList();
       for (final key in keysToDelete) {
         await _myBox.delete(key);
       }
 
-      // Masukkan data terbaru dari Atlas
       await _myBox.addAll(cloudData);
 
-      // Tampilkan gabungan: cloud + pending lokal
       logsNotifier.value = [...cloudData, ...pendingData];
 
       await LogHelper.writeLog(
@@ -63,9 +86,7 @@ class LogController {
     }
   }
 
-  // ─── SYNC PENDING ────────────────────────────────────────
-  // Dipanggil saat HP kembali online. Upload semua data
-  // yang isSynced == false ke Atlas, lalu tandai jadi true.
+  // ─── SYNC PENDING ─────────────────────────────────────────────────────────────
   Future<void> syncPendingLogs() async {
     final pendingLogs = _myBox.values
         .where((log) => !log.isSynced)
@@ -91,7 +112,6 @@ class LogController {
       try {
         await MongoService().insertLogModel(log);
 
-        // Tandai sudah sync di Hive
         final hiveIndex =
             _myBox.values.toList().indexWhere((l) => l.id == log.id);
         if (hiveIndex != -1) {
@@ -114,15 +134,13 @@ class LogController {
     );
   }
 
-  // ─── ADD ─────────────────────────────────────────────────
-  // authorId dan teamId sekarang diterima langsung dari UI
-  // (dikirim oleh LogEditorPage sesuai pola di modul).
+  // ─── ADD ──────────────────────────────────────────────────────────────────────
   Future<void> addLog(
     String title,
     String description,
     String category,
-    String authorId,   // ← dari currentUser['uid'] di UI
-    String teamId,     // ← dari currentUser['teamId'] di UI
+    String authorId,
+    String teamId,
   ) async {
     final newLog = LogModel(
       id: mongo.ObjectId().oid,
@@ -132,25 +150,21 @@ class LogController {
       category: category,
       authorId: authorId,
       teamId: teamId,
-      isSynced: false, // belum tersinkron
+      isSynced: false,
     );
 
-    // Simpan lokal dulu (instan, tidak peduli koneksi)
     await _myBox.add(newLog);
     logsNotifier.value = [...logsNotifier.value, newLog];
 
-    // Coba langsung kirim ke Atlas
     try {
       await MongoService().insertLogModel(newLog);
 
-      // Berhasil → update isSynced jadi true
       final hiveIndex =
           _myBox.values.toList().indexWhere((l) => l.id == newLog.id);
       if (hiveIndex != -1) {
         await _myBox.putAt(hiveIndex, newLog.copyWith(isSynced: true));
       }
 
-      // Update notifier juga
       logsNotifier.value = logsNotifier.value.map((l) {
         return l.id == newLog.id ? l.copyWith(isSynced: true) : l;
       }).toList();
@@ -161,37 +175,37 @@ class LogController {
         level: 2,
       );
     } catch (e) {
-      // Offline/gagal → isSynced tetap false, akan dicoba saat online
       await LogHelper.writeLog(
-        "WARNING: '${newLog.title}' disimpan lokal "
-        "(isSynced=false), akan sync saat online - $e",
+        "WARNING: '${newLog.title}' disimpan lokal (isSynced=false) - $e",
         source: "log_controller.dart",
         level: 1,
       );
     }
   }
 
-  // ─── UPDATE ──────────────────────────────────────────────
-  Future<void> updateLog(
+  // ─── UPDATE (FR-03: cek role + ownership) ────────────────────────────────────
+  Future<bool> updateLog(
     int index,
     String title,
     String description,
     String category,
   ) async {
     final target = logsNotifier.value[index];
-
     final isOwner = target.authorId == currentUserId;
+
+    // FR-03: Guard — tolak jika tidak punya izin
     if (!AccessControlService.canPerform(
       currentUserRole,
       AccessControlService.actionUpdate,
       isOwner: isOwner,
     )) {
       await LogHelper.writeLog(
-        "SECURITY: Unauthorized update attempt by $currentUserId",
+        "SECURITY: Unauthorized update attempt by '$currentUserId' "
+        "(role: $currentUserRole, isOwner: $isOwner)",
         source: "log_controller.dart",
         level: 1,
       );
-      return;
+      return false; // ← kembalikan false agar UI bisa tampilkan pesan error
     }
 
     final updated = target.copyWith(
@@ -230,24 +244,27 @@ class LogController {
         level: 1,
       );
     }
+    return true;
   }
 
-  // ─── DELETE ──────────────────────────────────────────────
-  Future<void> removeLog(int index) async {
+  // ─── DELETE (FR-03: cek role + ownership) ────────────────────────────────────
+  Future<bool> removeLog(int index) async {
     final target = logsNotifier.value[index];
-
     final isOwner = target.authorId == currentUserId;
+
+    // FR-03: Guard — tolak jika tidak punya izin
     if (!AccessControlService.canPerform(
       currentUserRole,
       AccessControlService.actionDelete,
       isOwner: isOwner,
     )) {
       await LogHelper.writeLog(
-        "SECURITY BREACH: Unauthorized delete attempt by $currentUserId",
+        "SECURITY: Unauthorized delete attempt by '$currentUserId' "
+        "(role: $currentUserRole, isOwner: $isOwner)",
         source: "log_controller.dart",
         level: 1,
       );
-      return;
+      return false; // ← kembalikan false agar UI bisa tampilkan pesan error
     }
 
     final hiveIndex =
@@ -275,11 +292,10 @@ class LogController {
         );
       }
     }
+    return true;
   }
 
-  // ─── CONNECTIVITY LISTENER ───────────────────────────────
-  // Urutan yang benar: syncPending DULU → baru loadLogs
-  // agar data offline tidak tertimpa data cloud.
+  // ─── CONNECTIVITY LISTENER ────────────────────────────────────────────────────
   void startConnectivityListener(String teamId) {
     Connectivity().onConnectivityChanged.listen((result) async {
       final isOnline = result != ConnectivityResult.none;
@@ -289,8 +305,8 @@ class LogController {
           source: "log_controller.dart",
           level: 2,
         );
-        await syncPendingLogs(); // ← 1. upload pending dulu
-        await loadLogs(teamId);  // ← 2. baru pull dari Atlas
+        await syncPendingLogs();
+        await loadLogs(teamId);
       }
     });
   }
